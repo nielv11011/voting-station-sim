@@ -2,23 +2,24 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Voting station simulation</title>
 <style>
   body{margin:0;background:#12161c;color:#e6e9ee;font:14px system-ui,Segoe UI,sans-serif}
-  #bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:10px 14px;background:#1b212b;border-bottom:1px solid #2c3542}
+  #bar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:10px 14px;background:#1b212b;border-bottom:1px solid #2c3542}
   #bar label{display:flex;align-items:center;gap:6px;color:#aab4c3}
   #bar input[type=number]{width:54px;background:#12161c;color:#e6e9ee;border:1px solid #38445a;border-radius:4px;padding:3px}
-  #bar input[type=range]{width:130px}
+  #bar input[type=range]{width:120px}
   button,select{background:#2b6cb0;color:#fff;border:0;border-radius:5px;padding:6px 12px;cursor:pointer;font:inherit}
   select{background:#12161c;border:1px solid #38445a}
   button.alt{background:#38445a}
   #clock{font:600 20px ui-monospace,Consolas,monospace;color:#fff;margin-left:auto}
-  #wrap{max-width:1500px;margin:0 auto}
+  #wrap{max-width:1600px;margin:0 auto}
   canvas#c{width:100%;display:block;background:#1c232d}
   #lower{display:flex;flex-wrap:wrap;gap:16px;padding:14px}
   .card{background:#1b212b;border:1px solid #2c3542;border-radius:8px;padding:12px 14px}
   #kpis{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:10px}
-  .kpi b{display:block;font-size:26px;color:#fff;font-variant-numeric:tabular-nums}
+  .kpi b{display:block;font-size:24px;color:#fff;font-variant-numeric:tabular-nums}
   .kpi span{color:#8d9ab0;font-size:12px}
   table{border-collapse:collapse;font-variant-numeric:tabular-nums}
   th,td{padding:4px 10px;text-align:right;border-bottom:1px solid #2c3542}
@@ -29,6 +30,7 @@
   #stack div{height:100%}
   #legend{font-size:11px;color:#8d9ab0;line-height:1.6}
   #legend i{display:inline-block;width:10px;height:10px;margin:0 4px 0 10px;border-radius:2px;vertical-align:middle}
+  #cut{margin-top:10px;color:#ffb454;font-size:13px}
   canvas#ch{background:#12161c;border-radius:6px;width:100%;max-width:640px}
 </style>
 </head>
@@ -41,20 +43,22 @@
     <select id="sp">
       <option value="1">1x (real time)</option>
       <option value="5">5x</option>
-      <option value="20" selected>20x</option>
-      <option value="60">60x</option>
+      <option value="20">20x</option>
+      <option value="60" selected>60x</option>
       <option value="150">150x</option>
       <option value="300">300x</option>
+      <option value="600">600x</option>
     </select></label>
-  <label>Arrivals <input id="rate" type="range" min="20" max="200" value="80"><b id="rateV">80</b>/hour</label>
-  <label>ID <input id="mID" type="number" value="18" min="3"> s</label>
-  <label>Register <input id="mReg" type="number" value="22" min="3"> s</label>
-  <label>Finger <input id="mInk" type="number" value="10" min="3"> s</label>
-  <label>Booth <input id="mBooth" type="number" value="75" min="10"> s</label>
+  <label>Arrivals <input id="rate" type="range" min="20" max="200" value="60"><b id="rateV">60</b>/hour</label>
+  <label>ID <input id="mID" type="number" value="12" min="3"> s</label>
+  <label>Register <input id="mReg" type="number" value="15" min="3"> s</label>
+  <label>Finger <input id="mInk" type="number" value="8" min="3"> s</label>
+  <label>Booth <input id="mBooth" type="number" value="120" min="10"> s</label>
   <label>Needs help <input id="help" type="number" value="10" min="0" max="100"> %</label>
-  <div id="clock">07:00:00</div>
+  <label>Queue cutters <input id="cut" type="number" value="4" min="0" max="50"> %</label>
+  <div id="clock">06:20:00</div>
 </div>
-<canvas id="c" width="1200" height="560"></canvas>
+<canvas id="c" width="1400" height="560"></canvas>
 <div id="lower">
   <div class="card" style="flex:1 1 560px">
     <div id="kpis"></div>
@@ -62,9 +66,10 @@
     <div id="stack"></div>
     <div id="legend"></div>
     <table id="tbl" style="margin-top:10px;width:100%"></table>
+    <div id="cutinfo"></div>
   </div>
   <div class="card" style="flex:1 1 440px">
-    <div style="color:#8d9ab0;font-size:12px;margin-bottom:6px">Total time to vote, each dot is one voter (arrival to last ballot dropped). Line = running average.</div>
+    <div style="color:#8d9ab0;font-size:12px;margin-bottom:6px">Total time to vote, each dot is one voter (joined the line to last ballot dropped). Line = running average.</div>
     <canvas id="ch" width="640" height="260"></canvas>
   </div>
 </div>
@@ -76,38 +81,123 @@ const rnd=(a,b)=>a+Math.random()*(b-a);
 const expo=m=>-m*Math.log(1-Math.random());
 const erlang=(k,m)=>{let s=0;for(let i=0;i<k;i++)s+=expo(m/k);return s;};
 const $=id=>document.getElementById(id);
-const fmt=s=>{if(!isFinite(s))return'–';s=Math.round(s);const m=Math.floor(s/60);return m+'m '+String(s%60).padStart(2,'0')+'s';};
-const fmtc=s=>{s=Math.floor(7*3600+s);const h=Math.floor(s/3600)%24,m=Math.floor(s/60)%60,x=s%60;return [h,m,x].map(n=>String(n).padStart(2,'0')).join(':');};
+const fmt=s=>{if(!isFinite(s))return'–';s=Math.round(s);if(s>=3600)return Math.floor(s/3600)+'h '+String(Math.floor(s/60)%60).padStart(2,'0')+'m';const m=Math.floor(s/60);return m+'m '+String(s%60).padStart(2,'0')+'s';};
+// clock: t=0 is 06:20, doors open 07:00, close 21:00
+const B0=6*3600+20*60,OPEN=7*3600-B0,CLOSE=21*3600-B0;
+const fmtc=s=>{s=Math.floor(B0+s);const h=Math.floor(s/3600)%24,m=Math.floor(s/60)%60,x=s%60;return [h,m,x].map(n=>String(n).padStart(2,'0')).join(':');};
 
 // ---------- config (read live from the controls) ----------
 const cfg={get rate(){return +$('rate').value},
   mean:()=>[+$('mID').value,+$('mReg').value,+$('mInk').value],
   get booth(){return +$('mBooth').value},
-  get help(){return (+$('help').value||0)/100}};
+  get help(){return (+$('help').value||0)/100},
+  get cut(){return (+$('cut').value||0)/100}};
 $('rate').oninput=()=>$('rateV').textContent=$('rate').value;
 
 const STAGES=['ID check','Register','Finger mark','Booth','National box','Ward box'];
-const COLS=['#4aa3ff','#a78bfa','#2dd4bf','#f472b6','#3ecf8e','#ffb454'];
+const COLS=['#4aa3ff','#a78bfa','#2dd4bf','#c084fc','#3ecf8e','#ffb454'];
+const SEXCOL=['#3b82f6','#ec4899','#facc15'];   // male, female, not sure
+const slotX=i=>-22-i*16;                         // outside queue: slot 0 is at the door
 
 // ---------- state ----------
-let t,all,desks,bq,booths,boxes,leaving,totals,acc,nextArr,nextId,accT=0,paused=false,lastChart=0,lastStats=0;
+let t,all,oq,desks,bq,booths,boxes,leaving,totals,acc,nextArr,nextId,police,animal,nextAnimal,gateUntil,S,ev,done,doneT;
+let marshals,pq,amb,nextIncident,nextPriority;
+let accT=0,paused=false,lastChart=0,lastStats=0;
 function reset(){
-  t=0;all=[];leaving=[];totals=[];nextId=1;bq=[];
-  desks=[290,460,630].map((x,k)=>({x,k,q:[],occ:null,cur:null,rem:0,tot:1,help:false,busy:0,slow:1}));
+  t=0;all=[];oq=[];leaving=[];totals=[];nextId=1;bq=[];ev=[];done=false;doneT=0;animal=null;gateUntil=0;
+  S={police:0,voters:0,away:0,tried:0,turned:0,questions:0,priority:0,ambulance:0};
+  marshals=[newMarshal(-120,300),newMarshal(-40,352)];pq=[];amb=null;
+  nextIncident=OPEN+1800+expo(7200);nextPriority=OPEN+rnd(300,1500);
+  desks=[150,300,450].map((x,k)=>({x,k,occ:null,cur:null,done:false,rem:0,tot:1,help:false,busy:0,slow:1}));
   booths=[150,300,450].map(y=>({x:860,y,occ:null,timing:false,rem:0,tot:1,help:false,busy:0}));
   boxes=[{name:'NATIONAL',x:1100,y:225,col:COLS[4],q:[],cur:null,rem:0,tot:1,busy:0},
          {name:'WARD',x:1100,y:375,col:COLS[5],q:[],cur:null,rem:0,tot:1,busy:0}];
   acc=STAGES.map(()=>({n:0,w:0,s:0}));
+  police=[{x:-150,y:290,sp:30,pause:0,alert:0},{x:-50,y:360,sp:30,pause:0,alert:0}];
+  police.forEach(newPatrol);
+  nextAnimal=rnd(60,240);
   nextArr=expo(3600/cfg.rate);
+  for(let i=0;i<10;i++){const v=newVoter(slotX(i),325,-rnd(30,600));v.qE[0]=v.tA;v.qi=i;oq.push(v);all.push(v);} // already queuing at 06:20
 }
-reset();
-$('rs').onclick=reset;
+// ----- two floor officials who walk the queue answering questions -----
+function newMarshal(x,y){return {x,y,state:'patrol',tx:x,ty:y,pause:0,voter:null,pv:null,until:0,side:1,px:0,py:0};}
+function marshalStep(m,h){
+  const go=(x,y,sp)=>{const dx=x-m.x,dy=y-m.y,d=Math.hypot(dx,dy),s=sp*h;if(d<=s){m.x=x;m.y=y;}else{m.x+=dx/d*s;m.y+=dy/d*s;}return d;};
+  if(m.state==='patrol'){
+    if(m.pause>0){m.pause-=h;return;}
+    if(m.voter&&(!oq.includes(m.voter)||m.voter.x<-195))m.voter=null;
+    if(!m.voter){
+      const c=oq.slice(0,11).filter(v=>v.x>-195&&!(v.ask>t));
+      if(c.length&&Math.random()<0.8){m.voter=c[Math.floor(Math.random()*c.length)];m.side=Math.random()<.5?-1:1;}
+      else{
+        if(Math.hypot(m.tx-m.x,m.ty-m.y)<3){m.tx=rnd(-190,-10);m.ty=Math.random()<.5?rnd(284,300):rnd(350,366);m.pause=rnd(1,4);}
+        go(m.tx,m.ty,32);return;
+      }
+    }
+    const v=m.voter;
+    if(go(v.x,v.y+m.side*18,34)<3){m.state='assist';m.until=t+rnd(4,12);v.hold=Math.max(v.hold,m.until-t);v.ask=m.until;S.questions++;}
+  }else if(m.state==='assist'){
+    const v=m.voter;
+    if(!v||t>=m.until||!oq.includes(v)){m.state='patrol';m.voter=null;m.pause=rnd(15,60);return;}
+    go(v.x,v.y+m.side*18,34);
+  }else if(m.state==='toVoter'){
+    const v=m.pv;
+    if(go(v.x,v.y-18,50)<16){m.state='escort';v.escorted=true;log('An official is escorting an '+(v.pri==='elderly'?'elderly':'disabled')+' voter past the queue');}
+  }else if(m.state==='escort'){
+    const v=m.pv;
+    go(v.x+14,v.y-8,50);
+    if(v.tIn!==null){m.state='patrol';m.pv=null;m.pause=rnd(1,4);}
+  }else if(m.state==='toPatient'){
+    go(m.px,m.py,55);
+  }
+}
+// ----- rare incident: a voter in the queue falls ill and an ambulance takes them away -----
+function startIncident(){
+  const c=oq.filter((v,i)=>i>=1&&i<=10&&v.x>-190&&!v.cut);
+  if(!c.length){nextIncident=t+60;return;}
+  const p=c[Math.floor(Math.random()*c.length)];
+  oq.splice(oq.indexOf(p),1);const j=all.indexOf(p);if(j>=0)all.splice(j,1);
+  const why=['felt faint in the heat','twisted an ankle','had a fall','became unwell'][Math.floor(Math.random()*4)];
+  amb={x:-290,y:410,dir:1,stage:'in',timer:0,pat:{x:p.x,y:p.y,sex:p.sex,lift:0,gone:false}};
+  all.forEach(v=>{if(Math.hypot(v.x-p.x,v.y-p.y)<80)v.hold=Math.max(v.hold,rnd(2,4));});
+  const m=marshals.find(m=>m.state==='patrol'||m.state==='assist');
+  if(m){m.state='toPatient';m.voter=null;m.px=p.x-16;m.py=p.y-18;}
+  log('A voter '+why+' - ambulance called');
+}
+function ambStep(h){
+  const a=amb,sp=90*h;
+  if(a.stage==='in'){
+    const dx=a.pat.x-a.x;a.x+=Math.sign(dx)*Math.min(Math.abs(dx),sp);
+    if(Math.abs(dx)<1){a.stage='load';a.timer=0;}
+  }else if(a.stage==='load'){
+    a.timer+=h;a.pat.lift=Math.min(1,a.timer/4);
+    if(a.timer>=4.5)a.pat.gone=true;
+    if(a.timer>=6.5){a.stage='out';a.dir=-1;}
+  }else{
+    a.x-=sp;
+    if(a.x<-310){
+      amb=null;S.ambulance++;nextIncident=t+3600+expo(7200);
+      marshals.forEach(m=>{if(m.state==='toPatient'){m.state='patrol';m.pause=rnd(1,3);}});
+      log('The ambulance took the voter to hospital');
+    }
+  }
+}
+function newPatrol(p){p.tx=rnd(-190,-10);p.ty=Math.random()<.5?rnd(284,300):rnd(350,366);}
+function log(txt){ev.push({txt,t});if(ev.length>4)ev.shift();}
+$('rs').onclick=()=>{reset();paused=false;$('pp').textContent='Pause';};
 $('pp').onclick=()=>{paused=!paused;$('pp').textContent=paused?'Resume':'Pause';};
 
+function newVoter(x,y,tA){
+  const r=Math.random();
+  return {id:nextId++,x,y,sp:rnd(34,54),hold:0,qi:undefined,ahead:null,alpha:1,sex:r<.48?0:r<.96?1:2,
+    tA,tIn:null,qE:[],sS:[],wait:[],svc:[],cut:false,dealAt:0,flash:-99};
+}
 function spawn(){
-  const v={id:nextId++,x:-15,y:325,sp:rnd(34,54),hold:0,qi:undefined,ahead:null,alpha:1,
-    col:`hsl(${rnd(0,360)|0} 60% ${rnd(55,72)|0}%)`,tA:t,qE:[],sS:[],wait:[],svc:[],helped:false};
-  all.push(v);join(desks[0].q,v,0);
+  const v=newVoter(Math.min(-215,slotX(oq.length)-30),325,t);v.qE[0]=t;all.push(v);
+  if(oq.length>=6&&Math.random()<cfg.cut){          // a queue cutter: slips into the line a few places from the door
+    const j=1+Math.floor(Math.random()*Math.min(oq.length-1,10));
+    v.x=slotX(j);v.y=375;v.cut=true;v.dealAt=t+10+expo(70);S.tried++;oq.splice(j,0,v);
+  }else oq.push(v);
 }
 function join(q,v,stage){v.qi=undefined;v.hold=0;v.qE[stage]=t;q.push(v);}
 function reindex(v,i){ // "moving forward in line": each voter reacts to a gap after a random delay
@@ -126,63 +216,103 @@ function move(v,tx,ty,dt){
 }
 const near=(v,x,y)=>Math.abs(v.x-x)<2&&Math.abs(v.y-y)<2;
 const record=(k,v)=>{const a=acc[k];a.n++;a.w+=v.wait[k];a.s+=v.svc[k];};
+function eject(c,how){ // cutter is sent to the back of the line
+  const i=oq.indexOf(c);if(i<0)return;
+  oq.splice(i,1);c.cut=false;c.flash=t;oq.push(c);c.qi=undefined;c.hold=rnd(1,2.5);
+  if(how==='police'){S.police++;log('Police caught someone cutting the queue - sent to the back');}
+  else{S.voters++;log('Angry voters dealt with a queue cutter - sent to the back');}
+}
 
 function step(h){
   t+=h;
-  while(t>=nextArr){spawn();nextArr+=expo(3600/cfg.rate);}
+  const open=t>=OPEN,closed=t>=CLOSE;
+  while(t>=nextArr){if(!closed)spawn();else S.turned++;nextArr+=expo(3600/cfg.rate);}
 
-  // three desks
-  const means=cfg.mean();
-  // officials pace themselves to the booths: the more people stuck waiting for a booth, the slower they work
-  const slow=Math.min(2,1+0.12*Math.max(0,bq.length-2));
-  desks.forEach(d=>{
-    d.slow=slow;
-    // the line waits set back from the desk; only the front of the line may step up to the desk
-    d.q.forEach((v,i)=>{reindex(v,i);v.ahead=i?d.q[i-1]:null;move(v,d.x-50-i*16,325,h);});
-    const o=d.occ;
-    if(o){
-      if(!d.cur){
-        move(o,d.x,300,h);
-        if(near(o,d.x,300)){
-          const helped=Math.random()<cfg.help;
-          d.tot=Math.max(4,erlang(3,means[d.k]))+(helped?rnd(25,110):0);d.rem=d.tot;d.help=helped;
-          d.cur=o;o.sS[d.k]=t;o.wait[d.k]=t-o.qE[d.k];
-        }
-      }else{
-        d.rem-=h/slow;d.busy+=h;
-        if(d.rem<=0){
-          o.svc[d.k]=t-o.sS[d.k];record(d.k,o);
-          d.occ=null;d.cur=null;d.help=false;
-          if(d.q[0])d.q[0].hold=Math.max(d.q[0].hold,rnd(0.3,3.5)); // next in line reacts after a moment
-          if(d.k<2)join(desks[d.k+1].q,o,d.k+1);else{bq.push(o);o.qi=undefined;o.hold=0;o.qE[3]=t;}
-        }
-      }
-    }else if(d.q.length&&d.q[0].hold<=0&&near(d.q[0],d.x-50,325)){
-      d.occ=d.q.shift();d.occ.qi=undefined;d.occ.ahead=null;
+  // ----- the line outside -----
+  oq.forEach((v,i)=>{reindex(v,i);v.ahead=i?oq[i-1]:null;move(v,slotX(i),325,h);});
+
+  // ----- police patrol, cutters get caught or lynched by the crowd -----
+  police.forEach(p=>{
+    if(p.alert>0)p.alert-=h;
+    if(p.pause>0)p.pause-=h;
+    else{
+      const dx=p.tx-p.x,dy=p.ty-p.y,d=Math.hypot(dx,dy);
+      if(d<2){p.pause=rnd(0.5,4);newPatrol(p);}else{const s=Math.min(d,p.sp*h);p.x+=dx/d*s;p.y+=dy/d*s;}
+    }
+    const lim=Math.min(oq.length,30);
+    for(let i=0;i<lim;i++){const c=oq[i];
+      if(c.cut&&Math.hypot(p.x-c.x,p.y-c.y)<55&&Math.random()<1-Math.exp(-0.12*h)){eject(c,'police');p.pause=2.5;p.alert=2.5;break;}
     }
   });
+  for(let i=0;i<Math.min(oq.length-1,30);i++){const c=oq[i];if(c.cut&&t>=c.dealAt){eject(c,'voters');break;}}
 
-  // waiting area for the booths
-  bq.forEach((v,i)=>{reindex(v,i);v.ahead=null;move(v,700+Math.floor(i/5)*18,230+(i%5)*35,h);});
-  for(const b of booths){
-    if(!b.occ&&bq.length){const v=bq.shift();b.occ=v;b.timing=false;v.hold=rnd(0.5,3);}
+  // ----- the ID checker lets the next voter in only when ID + register are empty -----
+  const b=Math.max(0,bq.length-2);                      // booths backed up?
+  desks[0].slow=Math.min(3,1+0.25*b);                   // ID checker slows people coming in from outside
+  desks[1].slow=desks[2].slow=Math.min(1.6,1+0.08*b);   // register / finger desk ease off a bit
+  marshals.forEach(m=>marshalStep(m,h));
+  if(amb)ambStep(h);else if(open&&t>=nextIncident)startIncident();
+  if(open&&!closed&&t>=nextPriority&&!pq.length){            // an elderly / disabled voter is escorted straight to the door
+    const m=marshals.find(m=>m.state==='patrol'||m.state==='assist');
+    if(m){
+      const v=newVoter(-198,352,t);v.sp=20;v.pri=Math.random()<.5?'elderly':'disabled';v.qE[0]=t;
+      all.push(v);pq.push(v);m.state='toVoter';m.pv=v;m.voter=null;S.priority++;nextPriority=t+300+expo(1800);
+    }else nextPriority=t+30;
   }
-  booths.forEach(b=>{
-    const v=b.occ;if(!v)return;
-    if(!b.timing){
-      move(v,b.x,b.y,h);
-      if(near(v,b.x,b.y)){
+  pq.forEach(v=>{if(v.escorted){v.ahead=null;move(v,-22,347,h);}});
+  const f=oq[0];
+  const pvr=pq[0]&&near(pq[0],-22,347)?pq[0]:null;           // priority voter at the door goes first
+  const cand=pvr||(f&&f.hold<=0&&near(f,slotX(0),325)?f:null);
+  if(open&&cand&&!desks[0].occ&&!desks[1].occ&&t>=gateUntil){
+    if(cand===pvr)pq.shift();else oq.shift();
+    desks[0].occ=cand;cand.tIn=t;cand.qi=undefined;cand.ahead=null;
+    if(cand.cut){cand.cut=false;S.away++;}
+  }
+
+  // ----- three desks, one person each, no lines -----
+  const means=cfg.mean();
+  desks.forEach(d=>{
+    const o=d.occ;if(!o)return;
+    if(!d.cur){
+      move(o,d.x,300,h);
+      if(near(o,d.x,300)){
         const helped=Math.random()<cfg.help;
-        b.tot=Math.max(15,erlang(2,cfg.booth))+(helped?rnd(30,90):0);b.rem=b.tot;b.help=helped;
-        b.timing=true;v.sS[3]=t;v.wait[3]=t-v.qE[3];
+        d.tot=Math.max(4,erlang(3,means[d.k]))+(helped?rnd(25,110):0);d.rem=d.tot;d.help=helped;
+        d.cur=o;o.sS[d.k]=t;o.wait[d.k]=t-o.qE[d.k];
       }
     }else{
-      b.rem-=h;b.busy+=h;
-      if(b.rem<=0){v.svc[3]=t-v.sS[3];record(3,v);b.occ=null;b.timing=false;b.help=false;join(boxes[0].q,v,4);}
+      if(d.rem>0){d.rem-=h/d.slow;d.busy+=h;}
+      if(d.rem<=0){
+        if(!d.done){d.done=true;o.svc[d.k]=t-o.sS[d.k];record(d.k,o);}
+        if(d.k===0&&!desks[1].occ){desks[1].occ=o;o.qE[1]=t;d.occ=null;d.cur=null;d.done=false;d.help=false;}
+        else if(d.k===1&&!desks[2].occ){desks[2].occ=o;o.qE[2]=t;d.occ=null;d.cur=null;d.done=false;d.help=false;
+          gateUntil=t+(desks[0].slow-1)*8+rnd(0,2);}    // ID checker waits a while before waving the next one in
+        else if(d.k===2){bq.push(o);o.qi=undefined;o.hold=0;o.qE[3]=t;d.occ=null;d.cur=null;d.done=false;d.help=false;}
+      }
     }
   });
 
-  // the two ballot boxes
+  // ----- waiting area for the booths -----
+  bq.forEach((v,i)=>{reindex(v,i);v.ahead=null;move(v,584+Math.floor(i/5)*18,230+(i%5)*35,h);});
+  for(const bo of booths){
+    if(!bo.occ&&bq.length){const v=bq.shift();bo.occ=v;bo.timing=false;v.hold=rnd(0.5,3);}
+  }
+  booths.forEach(bo=>{
+    const v=bo.occ;if(!v)return;
+    if(!bo.timing){
+      move(v,bo.x,bo.y,h);
+      if(near(v,bo.x,bo.y)){
+        const helped=Math.random()<cfg.help;
+        bo.tot=Math.max(15,erlang(2,cfg.booth))+(helped?rnd(30,90):0);bo.rem=bo.tot;bo.help=helped;
+        bo.timing=true;v.sS[3]=t;v.wait[3]=t-v.qE[3];
+      }
+    }else{
+      bo.rem-=h;bo.busy+=h;
+      if(bo.rem<=0){v.svc[3]=t-v.sS[3];record(3,v);bo.occ=null;bo.timing=false;bo.help=false;join(boxes[0].q,v,4);}
+    }
+  });
+
+  // ----- the two ballot boxes -----
   boxes.forEach((bx,k)=>{
     bx.q.forEach((v,i)=>{reindex(v,i);v.ahead=i?bx.q[i-1]:null;move(v,bx.x-45-i*18,bx.y,h);});
     if(bx.cur){
@@ -190,7 +320,7 @@ function step(h){
       if(bx.rem<=0){
         const v=bx.cur;v.svc[4+k]=t-v.sS[4+k];record(4+k,v);bx.cur=null;bx.q.shift();
         if(k===0)join(boxes[1].q,v,5);
-        else{totals.push({t,tot:t-v.tA});leaving.push(v);}
+        else{totals.push({t,tot:t-v.tA,inside:t-v.tIn,out:v.tIn-v.tA});leaving.push(v);}
       }
     }else{
       const v=bx.q[0];
@@ -198,49 +328,134 @@ function step(h){
     }
   });
 
-  // finished voters just fade away (we don't track leaving)
+  // ----- finished voters just fade away (we don't track leaving) -----
   for(let i=leaving.length-1;i>=0;i--){
     const v=leaving[i];v.x+=30*h;v.alpha-=h/1.5;
     if(v.alpha<=0){leaving.splice(i,1);const j=all.indexOf(v);if(j>=0)all.splice(j,1);}
   }
+
+  // ----- a cat or dog runs through every now and again -----
+  if(!animal&&t>=nextAnimal){
+    const fromLeft=Math.random()<.5,dog=Math.random()<.5;
+    const wps=[];for(let i=0,n=3+Math.floor(Math.random()*3);i<n;i++)wps.push([rnd(-190,1180),rnd(90,540)]);
+    wps.push([fromLeft?1250:-260,rnd(90,540)]);
+    animal={kind:dog?'dog':'cat',x:fromLeft?-260:1250,y:rnd(90,540),wps,i:0,sp:dog?110:140,ph:0,vx:fromLeft?1:-1,seen:new Set()};
+    log('A '+animal.kind+' has run into the voting station!');
+  }
+  if(animal){
+    const a=animal,w=a.wps[a.i],dx=w[0]-a.x,dy=w[1]-a.y,d=Math.hypot(dx,dy);
+    if(d<4){a.i++;if(a.i>=a.wps.length){animal=null;nextAnimal=t+30+expo(150);}}
+    else{const s=a.sp*h;a.x+=dx/d*s;a.y+=dy/d*s;a.ph+=h*14;if(Math.abs(dx)>3)a.vx=dx>0?1:-1;}
+    if(animal)for(const v of all){
+      if(!a.seen.has(v.id)&&Math.abs(v.x-a.x)<40&&Math.abs(v.y-a.y)<40){a.seen.add(v.id);v.hold=Math.max(v.hold,rnd(1,2.5));}
+    }
+  }
+
+  if(closed&&!all.length&&!done){done=true;doneT=t;log('Station closed - the last voter has voted');}
 }
 
 // ---------- drawing ----------
 const cv=$('c'),g=cv.getContext('2d');
 function label(txt,x,y,col='#aab4c3',size=12,align='center'){g.fillStyle=col;g.font=size+'px system-ui';g.textAlign=align;g.fillText(txt,x,y);}
+function drawVoter(v){
+  g.globalAlpha=Math.max(0,v.alpha);
+  g.fillStyle=SEXCOL[v.sex];g.beginPath();g.arc(v.x,v.y,6.5,0,7);g.fill();
+  g.strokeStyle='#0d1117';g.lineWidth=1.5;g.stroke();
+  if(v.pri==='elderly'){g.strokeStyle='#cbd5e1';g.lineWidth=2;g.beginPath();g.moveTo(v.x+7,v.y-3);g.lineTo(v.x+9,v.y+9);g.stroke();}
+  if(v.pri==='disabled'){g.strokeStyle='#cbd5e1';g.lineWidth=2;g.beginPath();g.arc(v.x,v.y+4,7,0,7);g.stroke();}
+  if(v.pri&&v.tIn===null)label(v.pri,v.x,v.y-14,'#7dd3fc',10);
+  if(v.ask>t){g.fillStyle='#fff';g.beginPath();g.arc(v.x+9,v.y-11,6,0,7);g.fill();label('?',v.x+9,v.y-7,'#12161c',11);}
+  if(v.cut){g.strokeStyle='#ef4444';g.lineWidth=2;g.beginPath();g.arc(v.x,v.y,10,0,7);g.stroke();label('cutting in!',v.x,v.y-14,'#ef4444',10);}
+  if(t-v.flash<3){g.strokeStyle='#ef4444';g.lineWidth=2;g.beginPath();g.arc(v.x,v.y,10+(t-v.flash)*5,0,7);g.stroke();label('sent to back!',v.x,v.y-16,'#ef4444',10);}
+  g.globalAlpha=1;
+}
+function drawPolice(p){
+  g.fillStyle='#1e3a8a';g.beginPath();g.arc(p.x,p.y,8.5,0,7);g.fill();g.strokeStyle='#93c5fd';g.lineWidth=1.5;g.stroke();
+  g.fillStyle='#0b1226';g.fillRect(p.x-7,p.y-11,14,5);g.fillRect(p.x-9,p.y-7,18,2);
+  g.fillStyle='#fbbf24';g.beginPath();g.arc(p.x,p.y+1,2.2,0,7);g.fill();
+  label('police',p.x,p.y+22,'#93c5fd',10);
+  if(p.alert>0){g.fillStyle='#ef4444';g.beginPath();g.arc(p.x+12,p.y-14,8,0,7);g.fill();label('!',p.x+12,p.y-10,'#fff',12);}
+}
+function drawMarshal(m){
+  g.fillStyle='#a3e635';g.beginPath();g.arc(m.x,m.y,8,0,7);g.fill();g.strokeStyle='#365314';g.lineWidth=1.5;g.stroke();
+  g.fillStyle='#fff';g.fillRect(m.x-7,m.y-1,14,2.5);
+  g.fillStyle='#365314';g.beginPath();g.arc(m.x,m.y-9,3.5,0,7);g.fill();
+  label(m.state==='escort'||m.state==='toVoter'?'escort':'official',m.x,m.y+21,'#bef264',10);
+}
+function drawAmbulance(){
+  const a=amb;
+  if(!a.pat.gone){
+    g.save();g.translate(a.pat.x,a.pat.y+a.pat.lift*80);g.rotate(Math.PI/2);
+    g.fillStyle=SEXCOL[a.pat.sex];g.beginPath();g.ellipse(0,0,9,5,0,0,7);g.fill();g.strokeStyle='#0d1117';g.lineWidth=1.5;g.stroke();
+    g.restore();label('+',a.pat.x,a.pat.y+a.pat.lift*80-12,'#ef4444',16);
+  }
+  g.save();g.translate(a.x,a.y);g.scale(a.dir,1);
+  g.fillStyle='#f8fafc';g.fillRect(-24,-11,36,22);g.fillRect(12,-6,12,17);
+  g.fillStyle='#93c5fd';g.fillRect(15,-4,7,6);
+  g.fillStyle='#dc2626';g.fillRect(-14,-6,12,3.5);g.fillRect(-10,-10,3.5,12);
+  g.fillStyle=Math.floor(t*4)%2?'#3b82f6':'#ef4444';g.fillRect(-4,-15,8,4);
+  g.fillStyle='#111';g.beginPath();g.arc(-13,11,4,0,7);g.arc(15,11,4,0,7);g.fill();
+  g.restore();
+  label('ambulance',a.x,a.y+26,'#f8fafc',10);
+}
+function drawAnimal(a){
+  g.save();g.translate(a.x,a.y);g.scale(a.vx,1);
+  const dog=a.kind==='dog',body=dog?'#b9803f':'#8b8f98',k=dog?1.2:0.9;
+  g.scale(k,k);
+  g.strokeStyle=body;g.lineWidth=2;
+  for(let i=0;i<4;i++){const x=-6+i*4,sw=Math.sin(a.ph+i*1.6)*3;g.beginPath();g.moveTo(x,3);g.lineTo(x+sw,8);g.stroke();}
+  g.beginPath();g.moveTo(-9,-2);g.quadraticCurveTo(-15,dog?-8:-12,-12,dog?-9:-14);g.stroke(); // tail
+  g.fillStyle=body;g.beginPath();g.ellipse(0,0,10,5,0,0,7);g.fill();
+  g.beginPath();g.arc(10,-3,4.5,0,7);g.fill();
+  g.beginPath();                                                    // ears
+  if(dog){g.ellipse(8,-3,2,4,.3,0,7);}else{g.moveTo(8,-6);g.lineTo(9,-11);g.lineTo(11.5,-6.5);g.moveTo(11,-6.5);g.lineTo(13,-10);g.lineTo(14,-5);}
+  g.fillStyle=dog?'#7a4f20':body;g.fill();
+  g.fillStyle='#111';g.beginPath();g.arc(12,-4,.9,0,7);g.fill();
+  g.restore();
+  label(a.kind,a.x,a.y-16,'#f4f4f4',10);
+}
 function draw(){
-  g.clearRect(0,0,1200,560);
+  g.clearRect(0,0,1400,560);
+  const open=t>=OPEN,closed=t>=CLOSE;
+  // outside
+  g.fillStyle='#1b2620';g.fillRect(0,70,200,490);
+  g.fillStyle='#262f3a';g.fillRect(0,308,200,34);
+  label('OUTSIDE',100,92,'#6b7a90',12);
+  g.save();g.translate(200,0);
+  // hall
   g.fillStyle='#232c38';g.fillRect(0,70,1200,490);
-  g.strokeStyle='#3a475b';g.lineWidth=3;g.strokeRect(2,70,1196,488);
-  // entrance
-  g.fillStyle='#2b6cb0';g.fillRect(0,278,6,44);label('ENTRANCE',34,268,'#7fb2e8',11);
-  const outside=desks[0].q.length;
-  label('In line to ID check: '+outside,120,350,'#8d9ab0',11);
-  // corridor guide
-  g.strokeStyle='#2c3746';g.setLineDash([4,6]);g.lineWidth=1;g.beginPath();g.moveTo(0,325);g.lineTo(690,325);g.stroke();g.setLineDash([]);
+  g.strokeStyle='#3a475b';g.lineWidth=4;g.beginPath();
+  g.moveTo(0,295);g.lineTo(0,70);g.lineTo(1198,70);g.lineTo(1198,558);g.lineTo(0,558);g.lineTo(0,355);g.stroke();
+  // door and sign
+  if(!open||closed){g.fillStyle='#8a5a2b';g.fillRect(-4,295,8,60);}
+  else{g.fillStyle='#2f9e6b';g.fillRect(-4,295,8,8);g.fillRect(-4,347,8,8);}
+  const sign=closed?'CLOSED':open?'OPEN':'DOORS OPEN 07:00';
+  label(sign,0,284,closed?'#ef4444':open?'#3ecf8e':'#ffb454',12);
+
+  // outside queue counter
+  label('IN QUEUE',-100,122,'#aab4c3',12);
+  label(String(oq.length),-100,158,'#fff',36);
+  if(oq.length>11){label('◀ line carries on off-screen',-100,180,'#ffb454',11);label('('+(oq.length-11)+' more not visible)',-100,194,'#8d9ab0',10);}
+  g.strokeStyle='#2c3746';g.setLineDash([4,6]);g.lineWidth=1;g.beginPath();g.moveTo(-200,325);g.lineTo(0,325);g.stroke();g.setLineDash([]);
 
   // desks
   desks.forEach((d,k)=>{
-    // the one spot at the desk, and where the line starts
-    g.strokeStyle=COLS[k];g.lineWidth=1.5;g.setLineDash([3,3]);g.beginPath();g.arc(d.x,300,11,0,7);g.stroke();
-    g.beginPath();g.moveTo(d.x-47,314);g.lineTo(d.x-47,336);g.stroke();g.setLineDash([]);
-    label('wait here',d.x-47,352,'#6b7a90',10);
-    if(d.slow>1.05)label('slowed to '+Math.round(100/d.slow)+'% (booths backed up)',d.x,190,'#ffb454',10);
+    g.strokeStyle=COLS[k];g.lineWidth=1.5;g.setLineDash([3,3]);g.beginPath();g.arc(d.x,300,11,0,7);g.stroke();g.setLineDash([]);
     g.fillStyle='#5b4a38';g.fillRect(d.x-38,262,76,22);
     g.fillStyle=COLS[k];g.beginPath();g.arc(d.x,243,10,0,7);g.fill();
     g.fillStyle='#fff';g.font='bold 11px system-ui';g.textAlign='center';g.fillText('O',d.x,247);
     label((k+1)+' · '+STAGES[k],d.x,206,COLS[k],13);
     label('official',d.x,226,'#8d9ab0',10);
-    if(d.cur){ // progress bar
-      g.fillStyle='#12161c';g.fillRect(d.x-30,288,60,4);
-      g.fillStyle=d.help?'#f87171':COLS[k];g.fillRect(d.x-30,288,60*(1-d.rem/d.tot),4);
-    }
+    if(d.slow>1.05)label(k===0?'holding the line back ('+Math.round(100/d.slow)+'% pace)':'slowed to '+Math.round(100/d.slow)+'%',d.x,190,'#ffb454',10);
+    if(d.cur){g.fillStyle='#12161c';g.fillRect(d.x-30,288,60,4);g.fillStyle=d.help?'#f87171':COLS[k];g.fillRect(d.x-30,288,60*(1-Math.max(0,d.rem)/d.tot),4);}
+    if(d.done&&d.k<2&&desks[d.k+1].occ)label('waiting for next desk',d.x,330,'#ffb454',10);
     if(d.help){g.fillStyle='#f87171';g.beginPath();g.arc(d.x+22,236,9,0,7);g.fill();label('!',d.x+22,241,'#fff',13);label('assisting',d.x+22,222,'#f87171',10);}
   });
+  label('no lines at the desks: ID + register take one voter at a time',300,370,'#6b7a90',11);
 
   // booth waiting area
-  g.strokeStyle='#3a475b';g.setLineDash([5,5]);g.strokeRect(676,212,76,178);g.setLineDash([]);
-  label('waiting for a booth',714,206,'#8d9ab0',11);label(bq.length+' waiting',714,406,'#8d9ab0',11);
+  g.strokeStyle='#3a475b';g.setLineDash([5,5]);g.lineWidth=1.5;g.strokeRect(560,212,76,178);g.setLineDash([]);
+  label('waiting for a booth',598,206,'#8d9ab0',11);label(bq.length+' waiting',598,406,'#8d9ab0',11);
 
   // booths
   booths.forEach((b,i)=>{
@@ -249,7 +464,7 @@ function draw(){
     g.moveTo(b.x-45,b.y-45);g.lineTo(b.x+45,b.y-45);g.lineTo(b.x+45,b.y+45);g.lineTo(b.x-45,b.y+45);g.stroke();
     g.lineWidth=2;g.beginPath();g.moveTo(b.x-45,b.y-45);g.lineTo(b.x-45,b.y-26);g.moveTo(b.x-45,b.y+45);g.lineTo(b.x-45,b.y+26);g.stroke();
     label('Booth '+(i+1),b.x+10,b.y-52,COLS[3],12);
-    g.fillStyle='#5b4a38';g.fillRect(b.x+22,b.y-14,18,28); // writing shelf
+    g.fillStyle='#5b4a38';g.fillRect(b.x+22,b.y-14,18,28);
     if(b.timing){
       g.fillStyle='#12161c';g.fillRect(b.x-30,b.y+30,60,4);
       g.fillStyle=b.help?'#f87171':COLS[3];g.fillRect(b.x-30,b.y+30,60*(1-b.rem/b.tot),4);
@@ -265,64 +480,85 @@ function draw(){
     if(bx.cur){g.fillStyle='#fff';g.fillRect(bx.x-30,bx.y-1,16,3);}
   });
 
-  // voters
-  [...all].sort((a,b)=>a.y-b.y).forEach(v=>{
-    g.globalAlpha=Math.max(0,v.alpha);
-    g.fillStyle=v.col;g.beginPath();g.arc(v.x,v.y,6.5,0,7);g.fill();
-    g.strokeStyle='#0d1117';g.lineWidth=1.5;g.stroke();
-    if(v.hold>0){g.fillStyle='#f4f4f4';g.fillRect(v.x-1,v.y-14,2,2);} // dawdling marker
-    g.globalAlpha=1;
-  });
-  // service rings
+  // voters (skip those far off-screen)
+  const vis=all.filter(v=>v.x>-215);
+  vis.sort((a,b)=>a.y-b.y).forEach(drawVoter);
+  // angry faces behind each cutter
+  for(let i=0;i<Math.min(oq.length,30);i++){const c=oq[i];
+    if(c.cut)for(let j=i+1;j<=i+3&&j<oq.length;j++)label('!!',oq[j].x,oq[j].y-12,'#ef4444',11);
+  }
   desks.forEach(d=>{if(d.cur){g.strokeStyle=COLS[d.k];g.lineWidth=2;g.beginPath();g.arc(d.cur.x,d.cur.y,10,0,7);g.stroke();}});
   boxes.forEach(b=>{if(b.cur){g.strokeStyle=b.col;g.lineWidth=2;g.beginPath();g.arc(b.cur.x,b.cur.y,10,0,7);g.stroke();}});
+  police.forEach(drawPolice);
+  marshals.forEach(drawMarshal);
+  if(amb)drawAmbulance();
+  if(animal)drawAnimal(animal);
 
-  // header text
-  label('Voting station · '+all.filter(v=>v.alpha>=1).length+' voters inside',12,24,'#e6e9ee',15,'left');
-  label('flow: entrance → 1 ID → 2 register → 3 finger → booths → national box → ward box',12,46,'#8d9ab0',12,'left');
+  // event log
+  ev.forEach((e,i)=>label(e.txt,12,500+i*16,t-e.t<60?'#ffb454':'#6b7a90',12,'left'));
+  if(done){
+    g.fillStyle='rgba(10,14,20,.78)';g.fillRect(250,200,700,150);
+    label('STATION CLOSED',600,255,'#ef4444',30);
+    label('Last voter finished at '+fmtc(doneT)+' · '+totals.length+' voted · '+S.turned+' turned away after 21:00',600,290,'#e6e9ee',14);
+    label('Press Reset to run another day',600,320,'#8d9ab0',13);
+  }
+  g.restore();
+
+  // header
+  label('Voting station · '+(done?'closed':closed?'closed to new voters, last queue still voting':open?'open':'doors open at 07:00')+' · '+all.filter(v=>v.alpha>=1&&v.tIn!==null).length+' voters inside',12,24,'#e6e9ee',15,'left');
+  label('flow: queue outside → 1 ID → 2 register → 3 finger → booths → national box → ward box',12,46,'#8d9ab0',12,'left');
+  [['male',0],['female',1],['not sure',2]].forEach(([n,s],i)=>{
+    const x=1070+i*105;g.fillStyle=SEXCOL[s];g.beginPath();g.arc(x,22,6.5,0,7);g.fill();label(n,x+11,26,'#aab4c3',12,'left');
+  });
 }
 
 // ---------- statistics ----------
 function pct(a,p){if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor(p*s.length))];}
+const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:NaN;
 function updateStats(){
-  const tt=totals.map(x=>x.tot),n=tt.length,mean=n?tt.reduce((a,b)=>a+b,0)/n:NaN;
+  const tt=totals.map(x=>x.tot),n=tt.length;
   $('kpis').innerHTML=
-   `<div class="kpi"><b>${fmt(mean)}</b><span>average time to vote</span></div>`+
+   `<div class="kpi"><b>${oq.length}</b><span>in the queue outside now</span></div>`+
    `<div class="kpi"><b>${n}</b><span>voted so far</span></div>`+
+   `<div class="kpi"><b>${fmt(avg(tt))}</b><span>average time to vote (joining the line to done)</span></div>`+
+   `<div class="kpi"><b>${fmt(avg(totals.map(x=>x.inside)))}</b><span>average inside the station</span></div>`+
+   `<div class="kpi"><b>${fmt(avg(totals.map(x=>x.out)))}</b><span>average wait in the queue outside</span></div>`+
    `<div class="kpi"><b>${fmt(pct(tt,.5))}</b><span>median</span></div>`+
    `<div class="kpi"><b>${fmt(pct(tt,.9))}</b><span>slowest 10% take over</span></div>`+
-   `<div class="kpi"><b>${fmt(Math.min(...tt))} – ${fmt(Math.max(...tt))}</b><span>fastest – slowest</span></div>`+
-   `<div class="kpi"><b>${(n/Math.max(t,1)*3600).toFixed(0)}/h</b><span>throughput</span></div>`;
+   `<div class="kpi"><b>${(n/Math.max(t-OPEN,1)*3600).toFixed(0)}/h</b><span>throughput</span></div>`;
   const servers=[1,1,1,3,1,1],busy=[...desks.map(d=>d.busy),booths.reduce((a,b)=>a+b.busy,0),boxes[0].busy,boxes[1].busy];
-  const qn=[...desks.map(d=>d.q.length),bq.length,boxes[0].q.length-(boxes[0].cur?1:0),boxes[1].q.length-(boxes[1].cur?1:0)];
+  const qn=[oq.length,0,0,bq.length,boxes[0].q.length-(boxes[0].cur?1:0),boxes[1].q.length-(boxes[1].cur?1:0)];
   let worst=-1,wv=-1;
   acc.forEach((a,i)=>{const w=a.n?a.w/a.n:0;if(w>wv){wv=w;worst=i;}});
   let rows='<tr><th>Stage</th><th>served</th><th>avg wait</th><th>avg service</th><th>busy</th><th>in queue now</th></tr>';
   acc.forEach((a,i)=>{
-    rows+=`<tr class="${i===worst&&wv>10?'bn':''}"><td><span style="color:${COLS[i]}">●</span> ${STAGES[i]}${i===worst&&wv>10?' ◀ longest wait':''}</td><td>${a.n}</td><td>${a.n?fmt(a.w/a.n):'–'}</td><td>${a.n?fmt(a.s/a.n):'–'}</td><td>${(busy[i]/Math.max(t,1)/servers[i]*100).toFixed(0)}%</td><td>${qn[i]}</td></tr>`;
+    rows+=`<tr class="${i===worst&&wv>10?'bn':''}"><td><span style="color:${COLS[i]}">●</span> ${STAGES[i]}${i===0?' (incl. queue outside)':''}${i===worst&&wv>10?' ◀ longest wait':''}</td><td>${a.n}</td><td>${a.n?fmt(a.w/a.n):'–'}</td><td>${a.n?fmt(a.s/a.n):'–'}</td><td>${Math.min(100,busy[i]/Math.max(t-OPEN,1)/servers[i]*100).toFixed(0)}%</td><td>${qn[i]}</td></tr>`;
   });
   $('tbl').innerHTML=rows;
-  // stacked bar of average time per stage
   let seg='',leg='',sum=0;const parts=[];
   acc.forEach((a,i)=>{if(!a.n)return;parts.push([a.w/a.n,COLS[i],.4,STAGES[i]+' wait'],[a.s/a.n,COLS[i],1,STAGES[i]+' service']);});
   parts.forEach(p=>sum+=p[0]);
   parts.forEach(p=>{seg+=`<div title="${p[3]}: ${fmt(p[0])}" style="width:${p[0]/Math.max(sum,1)*100}%;background:${p[1]};opacity:${p[2]}"></div>`;});
   acc.forEach((a,i)=>{if(a.n)leg+=`<i style="background:${COLS[i]}"></i>${STAGES[i]} ${fmt(a.w/a.n+a.s/a.n)}`;});
   $('stack').innerHTML=seg;$('legend').innerHTML=leg;
+  $('cutinfo').innerHTML=`Queue cutters: ${S.tried} tried · caught by police ${S.police} · dealt with by angry voters ${S.voters} · got away with it ${S.away}`+
+    `<br>Floor officials answered ${S.questions} questions in the queue · ${S.priority} elderly/disabled voters escorted to the front · ${S.ambulance} taken away by ambulance`+
+    (S.turned?` · turned away after closing: ${S.turned}`:'');
 }
 const ch=$('ch'),cg=ch.getContext('2d');
 function drawChart(){
   const W=640,H=260,L=44,B=26,T=10,R=10;
   cg.clearRect(0,0,W,H);
   const n=totals.length;
-  const maxT=Math.max(300,...totals.map(x=>x.tot))*1.1,maxX=Math.max(t,600);
+  const maxT=Math.max(600,...totals.map(x=>x.tot))*1.1,maxX=Math.max(t,3600);
   const X=s=>L+s/maxX*(W-L-R),Y=v=>H-B-v/maxT*(H-B-T);
   cg.strokeStyle='#2c3542';cg.fillStyle='#8d9ab0';cg.font='10px system-ui';cg.lineWidth=1;cg.textAlign='right';
-  const stepM=maxT>1800?10:maxT>900?5:2;
-  for(let m=0;m*60<=maxT;m+=stepM){cg.beginPath();cg.moveTo(L,Y(m*60));cg.lineTo(W-R,Y(m*60));cg.stroke();cg.fillText(m+'m',L-5,Y(m*60)+3);}
+  const steps=[1,2,5,10,15,30,60,120,240],stepM=steps.find(s=>maxT/60/s<=6)||240;
+  for(let m=0;m*60<=maxT;m+=stepM){cg.beginPath();cg.moveTo(L,Y(m*60));cg.lineTo(W-R,Y(m*60));cg.stroke();cg.fillText(m>=60&&m%60===0?m/60+'h':m+'m',L-5,Y(m*60)+3);}
   cg.textAlign='center';
-  const hrs=maxX/3600,hs=hrs>6?2:1;
-  for(let h=0;h<=hrs;h+=hs){cg.fillText(fmtc(h*3600).slice(0,5),X(h*3600),H-8);}
+  const hs=maxX/3600>6?2:1;
+  for(let hh=7;hh<=21;hh+=hs){const s=hh*3600-B0;if(s<=maxX)cg.fillText(String(hh).padStart(2,'0')+':00',X(s),H-8);}
+  cg.strokeStyle='#38445a';[OPEN,CLOSE].forEach(s=>{if(s<=maxX){cg.beginPath();cg.moveTo(X(s),T);cg.lineTo(X(s),H-B);cg.stroke();}});
   cg.fillStyle='rgba(74,163,255,.55)';
   totals.forEach(p=>{cg.beginPath();cg.arc(X(p.t),Y(p.tot),2.2,0,7);cg.fill();});
   if(n){
@@ -332,17 +568,18 @@ function drawChart(){
 }
 
 // ---------- main loop ----------
+reset();
 let last=performance.now();
 function frame(now){
   const dt=Math.min(0.1,(now-last)/1000);last=now;
-  if(!paused){
+  if(!paused&&!done){
     accT+=dt*(+$('sp').value);
     let guard=0;const h=0.25;
-    while(accT>=h&&guard++<20000){step(h);accT-=h;}
+    while(accT>=h&&guard++<20000&&!done){step(h);accT-=h;}
     if(accT>h*50)accT=0;
   }
   draw();
-  $('clock').textContent=fmtc(t);
+  $('clock').textContent=fmtc(done?doneT:t);
   if(now-lastStats>300){updateStats();lastStats=now;}
   if(now-lastChart>600){drawChart();lastChart=now;}
   requestAnimationFrame(frame);
