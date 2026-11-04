@@ -56,7 +56,7 @@
   <label>Booth <input id="mBooth" type="number" value="120" min="10"> s</label>
   <label>Needs help <input id="help" type="number" value="10" min="0" max="100"> %</label>
   <label>Queue cutters <input id="cut" type="number" value="4" min="0" max="50"> %</label>
-  <div id="clock">06:20:00</div>
+  <div id="clock">06:50:00</div>
 </div>
 <canvas id="c" width="1560" height="560"></canvas>
 <div id="lower">
@@ -82,8 +82,8 @@ const expo=m=>-m*Math.log(1-Math.random());
 const erlang=(k,m)=>{let s=0;for(let i=0;i<k;i++)s+=expo(m/k);return s;};
 const $=id=>document.getElementById(id);
 const fmt=s=>{if(!isFinite(s))return'–';s=Math.round(s);if(s>=3600)return Math.floor(s/3600)+'h '+String(Math.floor(s/60)%60).padStart(2,'0')+'m';const m=Math.floor(s/60);return m+'m '+String(s%60).padStart(2,'0')+'s';};
-// clock: t=0 is 06:20, doors open 07:00, close 21:00
-const B0=6*3600+20*60,OPEN=7*3600-B0,CLOSE=21*3600-B0;
+// clock: t=0 is 06:50, doors open 07:00, close 21:00
+const B0=6*3600+50*60,OPEN=7*3600-B0,CLOSE=21*3600-B0;
 const fmtc=s=>{s=Math.floor(B0+s);const h=Math.floor(s/3600)%24,m=Math.floor(s/60)%60,x=s%60;return [h,m,x].map(n=>String(n).padStart(2,'0')).join(':');};
 
 // ---------- config (read live from the controls) ----------
@@ -118,7 +118,7 @@ function reset(){
   police.forEach(newPatrol);
   nextAnimal=rnd(60,240);
   nextArr=expo(3600/cfg.rate);
-  for(let i=0;i<10;i++){const v=newVoter(slotX(i),325,-rnd(30,600));v.qE[0]=v.tA;v.qi=i;oq.push(v);all.push(v);} // already queuing at 06:20
+  for(let i=0;i<15;i++){const v=newVoter(slotX(i),325,-rnd(30,600));v.qE[0]=v.tA;v.qi=i;oq.push(v);all.push(v);} // already queuing at 06:50
 }
 // ----- two floor officials who walk the queue answering questions -----
 function newMarshal(x,y){return {x,y,state:'patrol',tx:x,ty:y,pause:0,voter:null,pv:null,until:0,side:1,px:0,py:0};}
@@ -345,8 +345,9 @@ function step(h){
   }
   if(animal){
     const a=animal,w=a.wps[a.i],dx=w[0]-a.x,dy=w[1]-a.y,d=Math.hypot(dx,dy);
-    if(d<4){a.i++;if(a.i>=a.wps.length){animal=null;nextAnimal=t+30+expo(150);}}
-    else{const s=a.sp*h;a.x+=dx/d*s;a.y+=dy/d*s;a.ph+=h*14;if(Math.abs(dx)>3)a.vx=dx>0?1:-1;}
+    const s=a.sp*h;
+    if(d<=s){a.x=w[0];a.y=w[1];a.i++;if(a.i>=a.wps.length){animal=null;nextAnimal=t+30+expo(150);}}
+    else{a.x+=dx/d*s;a.y+=dy/d*s;a.ph+=h*14;if(Math.abs(dx)>12)a.vx=dx>0?1:-1;}
     if(animal)for(const v of all){
       if(!a.seen.has(v.id)&&Math.abs(v.x-a.x)<40&&Math.abs(v.y-a.y)<40){a.seen.add(v.id);v.hold=Math.max(v.hold,rnd(1,2.5));}
     }
