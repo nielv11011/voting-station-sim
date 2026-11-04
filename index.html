@@ -58,7 +58,7 @@
   <label>Queue cutters <input id="cut" type="number" value="4" min="0" max="50"> %</label>
   <div id="clock">06:20:00</div>
 </div>
-<canvas id="c" width="1400" height="560"></canvas>
+<canvas id="c" width="1560" height="560"></canvas>
 <div id="lower">
   <div class="card" style="flex:1 1 560px">
     <div id="kpis"></div>
@@ -97,6 +97,7 @@ $('rate').oninput=()=>$('rateV').textContent=$('rate').value;
 const STAGES=['ID check','Register','Finger mark','Booth','National box','Ward box'];
 const COLS=['#4aa3ff','#a78bfa','#2dd4bf','#c084fc','#3ecf8e','#ffb454'];
 const SEXCOL=['#3b82f6','#ec4899','#facc15'];   // male, female, not sure
+const OUT=360;                                   // width of the pavement outside the door
 const slotX=i=>-22-i*16;                         // outside queue: slot 0 is at the door
 
 // ---------- state ----------
@@ -125,12 +126,12 @@ function marshalStep(m,h){
   const go=(x,y,sp)=>{const dx=x-m.x,dy=y-m.y,d=Math.hypot(dx,dy),s=sp*h;if(d<=s){m.x=x;m.y=y;}else{m.x+=dx/d*s;m.y+=dy/d*s;}return d;};
   if(m.state==='patrol'){
     if(m.pause>0){m.pause-=h;return;}
-    if(m.voter&&(!oq.includes(m.voter)||m.voter.x<-195))m.voter=null;
+    if(m.voter&&(!oq.includes(m.voter)||m.voter.x<-(OUT-5)))m.voter=null;
     if(!m.voter){
-      const c=oq.slice(0,11).filter(v=>v.x>-195&&!(v.ask>t));
+      const c=oq.slice(0,21).filter(v=>v.x>-(OUT-5)&&!(v.ask>t));
       if(c.length&&Math.random()<0.8){m.voter=c[Math.floor(Math.random()*c.length)];m.side=Math.random()<.5?-1:1;}
       else{
-        if(Math.hypot(m.tx-m.x,m.ty-m.y)<3){m.tx=rnd(-190,-10);m.ty=Math.random()<.5?rnd(284,300):rnd(350,366);m.pause=rnd(1,4);}
+        if(Math.hypot(m.tx-m.x,m.ty-m.y)<3){m.tx=rnd(-(OUT-10),-10);m.ty=Math.random()<.5?rnd(284,300):rnd(350,366);m.pause=rnd(1,4);}
         go(m.tx,m.ty,32);return;
       }
     }
@@ -153,12 +154,12 @@ function marshalStep(m,h){
 }
 // ----- rare incident: a voter in the queue falls ill and an ambulance takes them away -----
 function startIncident(){
-  const c=oq.filter((v,i)=>i>=1&&i<=10&&v.x>-190&&!v.cut);
+  const c=oq.filter((v,i)=>i>=1&&i<=20&&v.x>-(OUT-10)&&!v.cut);
   if(!c.length){nextIncident=t+60;return;}
   const p=c[Math.floor(Math.random()*c.length)];
   oq.splice(oq.indexOf(p),1);const j=all.indexOf(p);if(j>=0)all.splice(j,1);
   const why=['felt faint in the heat','twisted an ankle','had a fall','became unwell'][Math.floor(Math.random()*4)];
-  amb={x:-290,y:410,dir:1,stage:'in',timer:0,pat:{x:p.x,y:p.y,sex:p.sex,lift:0,gone:false}};
+  amb={x:-(OUT+90),y:410,dir:1,stage:'in',timer:0,pat:{x:p.x,y:p.y,sex:p.sex,lift:0,gone:false}};
   all.forEach(v=>{if(Math.hypot(v.x-p.x,v.y-p.y)<80)v.hold=Math.max(v.hold,rnd(2,4));});
   const m=marshals.find(m=>m.state==='patrol'||m.state==='assist');
   if(m){m.state='toPatient';m.voter=null;m.px=p.x-16;m.py=p.y-18;}
@@ -175,14 +176,14 @@ function ambStep(h){
     if(a.timer>=6.5){a.stage='out';a.dir=-1;}
   }else{
     a.x-=sp;
-    if(a.x<-310){
+    if(a.x<-(OUT+110)){
       amb=null;S.ambulance++;nextIncident=t+3600+expo(7200);
       marshals.forEach(m=>{if(m.state==='toPatient'){m.state='patrol';m.pause=rnd(1,3);}});
       log('The ambulance took the voter to hospital');
     }
   }
 }
-function newPatrol(p){p.tx=rnd(-190,-10);p.ty=Math.random()<.5?rnd(284,300):rnd(350,366);}
+function newPatrol(p){p.tx=rnd(-(OUT-10),-10);p.ty=Math.random()<.5?rnd(284,300):rnd(350,366);}
 function log(txt){ev.push({txt,t});if(ev.length>4)ev.shift();}
 $('rs').onclick=()=>{reset();paused=false;$('pp').textContent='Pause';};
 $('pp').onclick=()=>{paused=!paused;$('pp').textContent=paused?'Resume':'Pause';};
@@ -193,9 +194,9 @@ function newVoter(x,y,tA){
     tA,tIn:null,qE:[],sS:[],wait:[],svc:[],cut:false,dealAt:0,flash:-99};
 }
 function spawn(){
-  const v=newVoter(Math.min(-215,slotX(oq.length)-30),325,t);v.qE[0]=t;all.push(v);
+  const v=newVoter(Math.min(-(OUT+15),slotX(oq.length)-30),325,t);v.qE[0]=t;all.push(v);
   if(oq.length>=6&&Math.random()<cfg.cut){          // a queue cutter: slips into the line a few places from the door
-    const j=1+Math.floor(Math.random()*Math.min(oq.length-1,10));
+    const j=1+Math.floor(Math.random()*Math.min(oq.length-1,20));
     v.x=slotX(j);v.y=375;v.cut=true;v.dealAt=t+10+expo(70);S.tried++;oq.splice(j,0,v);
   }else oq.push(v);
 }
@@ -255,7 +256,7 @@ function step(h){
   if(open&&!closed&&t>=nextPriority&&!pq.length){            // an elderly / disabled voter is escorted straight to the door
     const m=marshals.find(m=>m.state==='patrol'||m.state==='assist');
     if(m){
-      const v=newVoter(-198,352,t);v.sp=20;v.pri=Math.random()<.5?'elderly':'disabled';v.qE[0]=t;
+      const v=newVoter(-(OUT-2),352,t);v.sp=20;v.pri=Math.random()<.5?'elderly':'disabled';v.qE[0]=t;
       all.push(v);pq.push(v);m.state='toVoter';m.pv=v;m.voter=null;S.priority++;nextPriority=t+300+expo(1800);
     }else nextPriority=t+30;
   }
@@ -337,9 +338,9 @@ function step(h){
   // ----- a cat or dog runs through every now and again -----
   if(!animal&&t>=nextAnimal){
     const fromLeft=Math.random()<.5,dog=Math.random()<.5;
-    const wps=[];for(let i=0,n=3+Math.floor(Math.random()*3);i<n;i++)wps.push([rnd(-190,1180),rnd(90,540)]);
-    wps.push([fromLeft?1250:-260,rnd(90,540)]);
-    animal={kind:dog?'dog':'cat',x:fromLeft?-260:1250,y:rnd(90,540),wps,i:0,sp:dog?110:140,ph:0,vx:fromLeft?1:-1,seen:new Set()};
+    const wps=[];for(let i=0,n=3+Math.floor(Math.random()*3);i<n;i++)wps.push([rnd(-(OUT-10),1180),rnd(90,540)]);
+    wps.push([fromLeft?1250:-(OUT+60),rnd(90,540)]);
+    animal={kind:dog?'dog':'cat',x:fromLeft?-(OUT+60):1250,y:rnd(90,540),wps,i:0,sp:dog?110:140,ph:0,vx:fromLeft?1:-1,seen:new Set()};
     log('A '+animal.kind+' has run into the voting station!');
   }
   if(animal){
@@ -415,13 +416,13 @@ function drawAnimal(a){
   label(a.kind,a.x,a.y-16,'#f4f4f4',10);
 }
 function draw(){
-  g.clearRect(0,0,1400,560);
+  g.clearRect(0,0,1560,560);
   const open=t>=OPEN,closed=t>=CLOSE;
   // outside
-  g.fillStyle='#1b2620';g.fillRect(0,70,200,490);
-  g.fillStyle='#262f3a';g.fillRect(0,308,200,34);
-  label('OUTSIDE',100,92,'#6b7a90',12);
-  g.save();g.translate(200,0);
+  g.fillStyle='#1b2620';g.fillRect(0,70,OUT,490);
+  g.fillStyle='#262f3a';g.fillRect(0,308,OUT,34);
+  label('OUTSIDE',OUT/2,92,'#6b7a90',12);
+  g.save();g.translate(OUT,0);
   // hall
   g.fillStyle='#232c38';g.fillRect(0,70,1200,490);
   g.strokeStyle='#3a475b';g.lineWidth=4;g.beginPath();
@@ -433,10 +434,11 @@ function draw(){
   label(sign,0,284,closed?'#ef4444':open?'#3ecf8e':'#ffb454',12);
 
   // outside queue counter
-  label('IN QUEUE',-100,122,'#aab4c3',12);
-  label(String(oq.length),-100,158,'#fff',36);
-  if(oq.length>11){label('◀ line carries on off-screen',-100,180,'#ffb454',11);label('('+(oq.length-11)+' more not visible)',-100,194,'#8d9ab0',10);}
-  g.strokeStyle='#2c3746';g.setLineDash([4,6]);g.lineWidth=1;g.beginPath();g.moveTo(-200,325);g.lineTo(0,325);g.stroke();g.setLineDash([]);
+  label('IN QUEUE',-OUT/2,122,'#aab4c3',12);
+  label(String(oq.length),-OUT/2,158,'#fff',36);
+  const vs=Math.floor((OUT-22)/16);
+  if(oq.length>vs){label('◀ line carries on off-screen',-OUT/2,180,'#ffb454',11);label('('+(oq.length-vs)+' more not visible)',-OUT/2,194,'#8d9ab0',10);}
+  g.strokeStyle='#2c3746';g.setLineDash([4,6]);g.lineWidth=1;g.beginPath();g.moveTo(-OUT,325);g.lineTo(0,325);g.stroke();g.setLineDash([]);
 
   // desks
   desks.forEach((d,k)=>{
@@ -481,7 +483,7 @@ function draw(){
   });
 
   // voters (skip those far off-screen)
-  const vis=all.filter(v=>v.x>-215);
+  const vis=all.filter(v=>v.x>-(OUT+15));
   vis.sort((a,b)=>a.y-b.y).forEach(drawVoter);
   // angry faces behind each cutter
   for(let i=0;i<Math.min(oq.length,30);i++){const c=oq[i];
@@ -508,7 +510,7 @@ function draw(){
   label('Voting station · '+(done?'closed':closed?'closed to new voters, last queue still voting':open?'open':'doors open at 07:00')+' · '+all.filter(v=>v.alpha>=1&&v.tIn!==null).length+' voters inside',12,24,'#e6e9ee',15,'left');
   label('flow: queue outside → 1 ID → 2 register → 3 finger → booths → national box → ward box',12,46,'#8d9ab0',12,'left');
   [['male',0],['female',1],['not sure',2]].forEach(([n,s],i)=>{
-    const x=1070+i*105;g.fillStyle=SEXCOL[s];g.beginPath();g.arc(x,22,6.5,0,7);g.fill();label(n,x+11,26,'#aab4c3',12,'left');
+    const x=1230+i*105;g.fillStyle=SEXCOL[s];g.beginPath();g.arc(x,22,6.5,0,7);g.fill();label(n,x+11,26,'#aab4c3',12,'left');
   });
 }
 
