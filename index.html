@@ -159,7 +159,7 @@ function marshalStep(m,h){
 }
 // ----- rare incident: a voter in the queue falls ill and an ambulance takes them away -----
 function startIncident(){
-  const c=oq.filter((v,i)=>i>=1&&i<=39&&v.x>-(OUT-10)&&!v.cut);
+  const c=oq.filter((v,i)=>i>=1&&i<=39&&v.x>-(OUT-10)&&!v.cut&&!v.arr);
   if(!c.length){nextIncident=t+60;return;}
   const p=c[Math.floor(Math.random()*c.length)];
   oq.splice(oq.indexOf(p),1);const j=all.indexOf(p);if(j>=0)all.splice(j,1);
@@ -199,11 +199,11 @@ function newVoter(x,y,tA){
     tA,tIn:null,qE:[],sS:[],wait:[],svc:[],cut:false,dealAt:0,flash:-99};
 }
 function spawn(){
-  const tp=slotPos(oq.length),v=newVoter(oq.length<VIS?-(OUT+15):tp[0]-30,tp[1],t);v.qE[0]=t;all.push(v);
+  const tp=slotPos(oq.length),arr=oq.length<VIS,top=slotPos(VIS-1),v=newVoter(arr?top[0]:tp[0]-30,arr?top[1]-45:tp[1],t);v.qE[0]=t;all.push(v);
   if(oq.length>=6&&Math.random()<cfg.cut){          // a queue cutter: slips into the line a few places from the door
     const j=1+Math.floor(Math.random()*Math.min(oq.length-1,40));
     {const q=slotPos(j);v.x=q[0];v.y=q[1]+30;}v.cut=true;v.dealAt=t+10+expo(70);S.tried++;oq.splice(j,0,v);
-  }else oq.push(v);
+  }else{oq.push(v);if(arr){v.arr=true;v.pk=VIS-1;}}
 }
 function join(q,v,stage){v.qi=undefined;v.hold=0;v.qE[stage]=t;q.push(v);}
 function reindex(v,i){ // "moving forward in line": each voter reacts to a gap after a random delay
@@ -235,7 +235,15 @@ function step(h){
   while(t>=nextArr){if(!closed)spawn();else S.turned++;nextArr+=expo(3600/cfg.rate);}
 
   // ----- the line outside -----
-  oq.forEach((v,i)=>{reindex(v,i);v.ahead=i?oq[i-1]:null;move(v,slotPos(i)[0],slotPos(i)[1],h);});
+  oq.forEach((v,i)=>{
+    v.ahead=i?oq[i-1]:null;
+    if(v.arr){                                   // new arrival: walks down the empty lanes from the top to the back of the line
+      const p=slotPos(Math.max(i,v.pk));v.ahead=null;move(v,p[0],p[1],h);
+      if(near(v,p[0],p[1])){if(v.pk>i)v.pk--;else{v.arr=false;v.qi=i;}}
+      return;
+    }
+    reindex(v,i);const p=slotPos(i);move(v,p[0],p[1],h);
+  });
 
   // ----- police patrol, cutters get caught or lynched by the crowd -----
   police.forEach(p=>{
@@ -345,19 +353,9 @@ function step(h){
     const fromLeft=Math.random()<.5,dog=Math.random()<.5;
     const wps=[];for(let i=0,n=3+Math.floor(Math.random()*3);i<n;i++)wps.push([rnd(-(OUT-10),1180),rnd(90,540)]);
     wps.push([fromLeft?1250:-(OUT+60),rnd(90,540)]);
-    animal={kind:dog?'dog':'cat',x:fromLeft?-(OUT+60):1250,y:rnd(90,540),wps,i:0,sp:dog?110:140,ph:0,vx:fromLeft?1:-1,seen:new Set()};
+    animal={kind:dog?'dog':'cat',x:fromLeft?-(OUT+60):1250,y:rnd(90,540),wps,i:0,sp:dog?70:90,ph:0,vx:fromLeft?1:-1,seen:new Set()};
     log('A '+animal.kind+' has run into the voting station!');
   }
-  if(animal){
-    const a=animal,w=a.wps[a.i],dx=w[0]-a.x,dy=w[1]-a.y,d=Math.hypot(dx,dy);
-    const s=a.sp*h;
-    if(d<=s){a.x=w[0];a.y=w[1];a.i++;if(a.i>=a.wps.length){animal=null;nextAnimal=t+30+expo(150);}}
-    else{a.x+=dx/d*s;a.y+=dy/d*s;a.ph+=h*14;if(Math.abs(dx)>12)a.vx=dx>0?1:-1;}
-    if(animal)for(const v of all){
-      if(!a.seen.has(v.id)&&Math.abs(v.x-a.x)<40&&Math.abs(v.y-a.y)<40){a.seen.add(v.id);v.hold=Math.max(v.hold,rnd(1,2.5));}
-    }
-  }
-
   if(closed&&!all.length&&!done){done=true;doneT=t;log('Station closed - the last voter has voted');}
 }
 
@@ -405,6 +403,15 @@ function drawAmbulance(){
   g.restore();
   label('ambulance',a.x,a.y+26,'#f8fafc',10);
 }
+function animalFrame(dt){                         // real-time movement so it is watchable at any sim speed
+  const a=animal;if(!a)return;
+  const w=a.wps[a.i],dx=w[0]-a.x,dy=w[1]-a.y,d=Math.hypot(dx,dy),s=a.sp*dt;
+  if(d<=s){a.x=w[0];a.y=w[1];a.i++;if(a.i>=a.wps.length){animal=null;nextAnimal=t+600+expo(900);return;}}
+  else{a.x+=dx/d*s;a.y+=dy/d*s;a.ph+=dt*9;if(Math.abs(dx)>12)a.vx=dx>0?1:-1;}
+  for(const v of all){
+    if(!a.seen.has(v.id)&&Math.abs(v.x-a.x)<40&&Math.abs(v.y-a.y)<40){a.seen.add(v.id);v.hold=Math.max(v.hold,rnd(3,8));}
+  }
+}
 function drawAnimal(a){
   g.save();g.translate(a.x,a.y);g.scale(a.vx,1);
   const dog=a.kind==='dog',body=dog?'#b9803f':'#8b8f98',k=dog?1.2:0.9;
@@ -445,6 +452,7 @@ function draw(){
     const y=325-ROWH*r;g.fillRect(-336,y-13,328,26);
     if(r<ROWS-1)g.fillRect(r%2===0?-336:-34,y-ROWH-13,26,ROWH+26);
   }
+  label('arrivals ▼',-326,84,'#6b7a90',10);
   label('IN QUEUE',-OUT/2,480,'#aab4c3',12);
   label(String(oq.length),-OUT/2,520,'#fff',36);
   if(oq.length>VIS)label('◀ line carries on off-screen ('+(oq.length-VIS)+' more)',-OUT/2,545,'#ffb454',11);
@@ -584,6 +592,7 @@ let last=performance.now();
 function frame(now){
   const dt=Math.min(0.1,(now-last)/1000);last=now;
   if(!paused&&!done){
+    animalFrame(dt);
     accT+=dt*(+$('sp').value);
     let guard=0;const h=0.25;
     while(accT>=h&&guard++<20000&&!done){step(h);accT-=h;}
