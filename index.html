@@ -98,7 +98,12 @@ const STAGES=['ID check','Register','Finger mark','Booth','National box','Ward b
 const COLS=['#4aa3ff','#a78bfa','#2dd4bf','#c084fc','#3ecf8e','#ffb454'];
 const SEXCOL=['#3b82f6','#ec4899','#facc15'];   // male, female, not sure
 const OUT=360;                                   // width of the pavement outside the door
-const slotX=i=>-22-i*16;                         // outside queue: slot 0 is at the door
+const PER=20,ROWS=7,ROWH=34,VIS=PER*ROWS;           // outside queue snakes: 20 per row, 7 rows visible
+function slotPos(i){                              // slot 0 is at the door, even rows run away from it, odd rows run back
+  if(i>=VIS)return [-(OUT+30)-(i-VIS)*16,325-ROWH*(ROWS-1)];   // the rest carries on off-screen
+  const r=Math.floor(i/PER),c=i%PER;
+  return [r%2===0?-22-c*16:-22-(PER-1-c)*16,325-ROWH*r];
+}
 
 // ---------- state ----------
 let t,all,oq,desks,bq,booths,boxes,leaving,totals,acc,nextArr,nextId,police,animal,nextAnimal,gateUntil,S,ev,done,doneT;
@@ -118,7 +123,7 @@ function reset(){
   police.forEach(newPatrol);
   nextAnimal=rnd(60,240);
   nextArr=expo(3600/cfg.rate);
-  for(let i=0;i<15;i++){const v=newVoter(slotX(i),325,-rnd(30,600));v.qE[0]=v.tA;v.qi=i;oq.push(v);all.push(v);} // already queuing at 06:50
+  for(let i=0;i<15;i++){const v=newVoter(slotPos(i)[0],slotPos(i)[1],-rnd(30,600));v.qE[0]=v.tA;v.qi=i;oq.push(v);all.push(v);} // already queuing at 06:50
 }
 // ----- two floor officials who walk the queue answering questions -----
 function newMarshal(x,y){return {x,y,state:'patrol',tx:x,ty:y,pause:0,voter:null,pv:null,until:0,side:1,px:0,py:0};}
@@ -128,10 +133,10 @@ function marshalStep(m,h){
     if(m.pause>0){m.pause-=h;return;}
     if(m.voter&&(!oq.includes(m.voter)||m.voter.x<-(OUT-5)))m.voter=null;
     if(!m.voter){
-      const c=oq.slice(0,21).filter(v=>v.x>-(OUT-5)&&!(v.ask>t));
+      const c=oq.slice(0,100).filter(v=>v.x>-(OUT-5)&&!(v.ask>t));
       if(c.length&&Math.random()<0.8){m.voter=c[Math.floor(Math.random()*c.length)];m.side=Math.random()<.5?-1:1;}
       else{
-        if(Math.hypot(m.tx-m.x,m.ty-m.y)<3){m.tx=rnd(-(OUT-10),-10);m.ty=Math.random()<.5?rnd(284,300):rnd(350,366);m.pause=rnd(1,4);}
+        if(Math.hypot(m.tx-m.x,m.ty-m.y)<3){m.tx=rnd(-(OUT-10),-10);m.ty=rnd(100,440);m.pause=rnd(1,4);}
         go(m.tx,m.ty,32);return;
       }
     }
@@ -154,7 +159,7 @@ function marshalStep(m,h){
 }
 // ----- rare incident: a voter in the queue falls ill and an ambulance takes them away -----
 function startIncident(){
-  const c=oq.filter((v,i)=>i>=1&&i<=20&&v.x>-(OUT-10)&&!v.cut);
+  const c=oq.filter((v,i)=>i>=1&&i<=39&&v.x>-(OUT-10)&&!v.cut);
   if(!c.length){nextIncident=t+60;return;}
   const p=c[Math.floor(Math.random()*c.length)];
   oq.splice(oq.indexOf(p),1);const j=all.indexOf(p);if(j>=0)all.splice(j,1);
@@ -183,7 +188,7 @@ function ambStep(h){
     }
   }
 }
-function newPatrol(p){p.tx=rnd(-(OUT-10),-10);p.ty=Math.random()<.5?rnd(284,300):rnd(350,366);}
+function newPatrol(p){p.tx=rnd(-(OUT-10),-10);p.ty=rnd(100,440);}
 function log(txt){ev.push({txt,t});if(ev.length>4)ev.shift();}
 $('rs').onclick=()=>{reset();paused=false;$('pp').textContent='Pause';};
 $('pp').onclick=()=>{paused=!paused;$('pp').textContent=paused?'Resume':'Pause';};
@@ -194,10 +199,10 @@ function newVoter(x,y,tA){
     tA,tIn:null,qE:[],sS:[],wait:[],svc:[],cut:false,dealAt:0,flash:-99};
 }
 function spawn(){
-  const v=newVoter(Math.min(-(OUT+15),slotX(oq.length)-30),325,t);v.qE[0]=t;all.push(v);
+  const tp=slotPos(oq.length),v=newVoter(oq.length<VIS?-(OUT+15):tp[0]-30,tp[1],t);v.qE[0]=t;all.push(v);
   if(oq.length>=6&&Math.random()<cfg.cut){          // a queue cutter: slips into the line a few places from the door
-    const j=1+Math.floor(Math.random()*Math.min(oq.length-1,20));
-    v.x=slotX(j);v.y=375;v.cut=true;v.dealAt=t+10+expo(70);S.tried++;oq.splice(j,0,v);
+    const j=1+Math.floor(Math.random()*Math.min(oq.length-1,40));
+    {const q=slotPos(j);v.x=q[0];v.y=q[1]+30;}v.cut=true;v.dealAt=t+10+expo(70);S.tried++;oq.splice(j,0,v);
   }else oq.push(v);
 }
 function join(q,v,stage){v.qi=undefined;v.hold=0;v.qE[stage]=t;q.push(v);}
@@ -212,7 +217,7 @@ function move(v,tx,ty,dt){
   const s=Math.min(d,v.sp*dt);
   let nx=v.x+dx/d*s,ny=v.y+dy/d*s;
   const a=v.ahead;
-  if(a&&nx>a.x-15&&Math.abs(ny-a.y)<12)nx=Math.min(nx,Math.max(v.x,a.x-15));
+  if(a){const dn=Math.hypot(nx-a.x,ny-a.y);if(dn<14&&dn<Math.hypot(v.x-a.x,v.y-a.y))return;}
   v.x=nx;v.y=ny;
 }
 const near=(v,x,y)=>Math.abs(v.x-x)<2&&Math.abs(v.y-y)<2;
@@ -230,7 +235,7 @@ function step(h){
   while(t>=nextArr){if(!closed)spawn();else S.turned++;nextArr+=expo(3600/cfg.rate);}
 
   // ----- the line outside -----
-  oq.forEach((v,i)=>{reindex(v,i);v.ahead=i?oq[i-1]:null;move(v,slotX(i),325,h);});
+  oq.forEach((v,i)=>{reindex(v,i);v.ahead=i?oq[i-1]:null;move(v,slotPos(i)[0],slotPos(i)[1],h);});
 
   // ----- police patrol, cutters get caught or lynched by the crowd -----
   police.forEach(p=>{
@@ -240,12 +245,12 @@ function step(h){
       const dx=p.tx-p.x,dy=p.ty-p.y,d=Math.hypot(dx,dy);
       if(d<2){p.pause=rnd(0.5,4);newPatrol(p);}else{const s=Math.min(d,p.sp*h);p.x+=dx/d*s;p.y+=dy/d*s;}
     }
-    const lim=Math.min(oq.length,30);
+    const lim=Math.min(oq.length,60);
     for(let i=0;i<lim;i++){const c=oq[i];
       if(c.cut&&Math.hypot(p.x-c.x,p.y-c.y)<55&&Math.random()<1-Math.exp(-0.12*h)){eject(c,'police');p.pause=2.5;p.alert=2.5;break;}
     }
   });
-  for(let i=0;i<Math.min(oq.length-1,30);i++){const c=oq[i];if(c.cut&&t>=c.dealAt){eject(c,'voters');break;}}
+  for(let i=0;i<Math.min(oq.length-1,60);i++){const c=oq[i];if(c.cut&&t>=c.dealAt){eject(c,'voters');break;}}
 
   // ----- the ID checker lets the next voter in only when ID + register are empty -----
   const b=Math.max(0,bq.length-2);                      // booths backed up?
@@ -263,7 +268,7 @@ function step(h){
   pq.forEach(v=>{if(v.escorted){v.ahead=null;move(v,-22,347,h);}});
   const f=oq[0];
   const pvr=pq[0]&&near(pq[0],-22,347)?pq[0]:null;           // priority voter at the door goes first
-  const cand=pvr||(f&&f.hold<=0&&near(f,slotX(0),325)?f:null);
+  const cand=pvr||(f&&f.hold<=0&&near(f,-22,325)?f:null);
   if(open&&cand&&!desks[0].occ&&!desks[1].occ&&t>=gateUntil){
     if(cand===pvr)pq.shift();else oq.shift();
     desks[0].occ=cand;cand.tIn=t;cand.qi=undefined;cand.ahead=null;
@@ -387,9 +392,9 @@ function drawMarshal(m){
 function drawAmbulance(){
   const a=amb;
   if(!a.pat.gone){
-    g.save();g.translate(a.pat.x,a.pat.y+a.pat.lift*80);g.rotate(Math.PI/2);
+    g.save();g.translate(a.pat.x,a.pat.y+a.pat.lift*(a.y-a.pat.y-10));g.rotate(Math.PI/2);
     g.fillStyle=SEXCOL[a.pat.sex];g.beginPath();g.ellipse(0,0,9,5,0,0,7);g.fill();g.strokeStyle='#0d1117';g.lineWidth=1.5;g.stroke();
-    g.restore();label('+',a.pat.x,a.pat.y+a.pat.lift*80-12,'#ef4444',16);
+    g.restore();label('+',a.pat.x,a.pat.y+a.pat.lift*(a.y-a.pat.y-10)-12,'#ef4444',16);
   }
   g.save();g.translate(a.x,a.y);g.scale(a.dir,1);
   g.fillStyle='#f8fafc';g.fillRect(-24,-11,36,22);g.fillRect(12,-6,12,17);
@@ -421,7 +426,6 @@ function draw(){
   const open=t>=OPEN,closed=t>=CLOSE;
   // outside
   g.fillStyle='#1b2620';g.fillRect(0,70,OUT,490);
-  g.fillStyle='#262f3a';g.fillRect(0,308,OUT,34);
   label('OUTSIDE',OUT/2,92,'#6b7a90',12);
   g.save();g.translate(OUT,0);
   // hall
@@ -432,14 +436,18 @@ function draw(){
   if(!open||closed){g.fillStyle='#8a5a2b';g.fillRect(-4,295,8,60);}
   else{g.fillStyle='#2f9e6b';g.fillRect(-4,295,8,8);g.fillRect(-4,347,8,8);}
   const sign=closed?'CLOSED':open?'OPEN':'DOORS OPEN 07:00';
-  label(sign,0,284,closed?'#ef4444':open?'#3ecf8e':'#ffb454',12);
+  label(sign,34,284,closed?'#ef4444':open?'#3ecf8e':'#ffb454',12);
 
   // outside queue counter
-  label('IN QUEUE',-OUT/2,122,'#aab4c3',12);
-  label(String(oq.length),-OUT/2,158,'#fff',36);
-  const vs=Math.floor((OUT-22)/16);
-  if(oq.length>vs){label('◀ line carries on off-screen',-OUT/2,180,'#ffb454',11);label('('+(oq.length-vs)+' more not visible)',-OUT/2,194,'#8d9ab0',10);}
-  g.strokeStyle='#2c3746';g.setLineDash([4,6]);g.lineWidth=1;g.beginPath();g.moveTo(-OUT,325);g.lineTo(0,325);g.stroke();g.setLineDash([]);
+  // queue lanes (the snake), then the counter below them
+  g.fillStyle='#262f3a';
+  for(let r=0;r<ROWS;r++){
+    const y=325-ROWH*r;g.fillRect(-336,y-13,328,26);
+    if(r<ROWS-1)g.fillRect(r%2===0?-336:-34,y-ROWH-13,26,ROWH+26);
+  }
+  label('IN QUEUE',-OUT/2,480,'#aab4c3',12);
+  label(String(oq.length),-OUT/2,520,'#fff',36);
+  if(oq.length>VIS)label('◀ line carries on off-screen ('+(oq.length-VIS)+' more)',-OUT/2,545,'#ffb454',11);
 
   // desks
   desks.forEach((d,k)=>{
@@ -487,7 +495,7 @@ function draw(){
   const vis=all.filter(v=>v.x>-(OUT+15));
   vis.sort((a,b)=>a.y-b.y).forEach(drawVoter);
   // angry faces behind each cutter
-  for(let i=0;i<Math.min(oq.length,30);i++){const c=oq[i];
+  for(let i=0;i<Math.min(oq.length,60);i++){const c=oq[i];
     if(c.cut)for(let j=i+1;j<=i+3&&j<oq.length;j++)label('!!',oq[j].x,oq[j].y-12,'#ef4444',11);
   }
   desks.forEach(d=>{if(d.cur){g.strokeStyle=COLS[d.k];g.lineWidth=2;g.beginPath();g.arc(d.cur.x,d.cur.y,10,0,7);g.stroke();}});
